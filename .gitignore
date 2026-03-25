@@ -1,0 +1,4 @@
+/priv/rexec_native
+/native/rexec_native/target/
+/_build/
+/deps/
