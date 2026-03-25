@@ -3,27 +3,22 @@ defmodule Mix.Tasks.Compile.RexecNative do
 
   use Mix.Task.Compiler
 
-  @native_dir "native/rexec_native"
+  @binary_name "rexec_native"
+  @native_root Path.join([File.cwd!(), "native", "rexec_native"])
 
   @impl true
   def run(_args) do
-    native_dir = Path.join(File.cwd!(), @native_dir)
-    priv_dir = Path.join(File.cwd!(), "priv")
-    File.mkdir_p!(priv_dir)
+    target = Path.join([Mix.Project.app_path(), "priv", @binary_name])
 
-    target = Path.join(priv_dir, "rexec_native")
-    manifest = Path.join(native_dir, "target/release/rexec_native")
-
-    if needs_build?(target, native_dir) do
+    if needs_build?(target) do
       Mix.shell().info("Compiling rexec_native...")
 
       case System.cmd("cargo", ["build", "--release"],
-             cd: native_dir,
+             cd: @native_root,
              stderr_to_stdout: true
            ) do
         {_output, 0} ->
-          File.cp!(manifest, target)
-          File.chmod!(target, 0o755)
+          copy_binary(target)
           {:ok, []}
 
         {output, code} ->
@@ -34,15 +29,18 @@ defmodule Mix.Tasks.Compile.RexecNative do
     end
   end
 
-  defp needs_build?(target, native_dir) do
+  defp needs_build?(target) do
     if File.exists?(target) do
       if Mix.env() == :prod do
         false
       else
         target_mtime = File.stat!(target).mtime
 
-        Path.wildcard(Path.join(native_dir, "src/**/*.rs"))
-        |> Enum.concat([Path.join(native_dir, "Cargo.toml"), Path.join(native_dir, "Cargo.lock")])
+        Path.wildcard(Path.join(@native_root, "src/**/*.rs"))
+        |> Enum.concat([
+          Path.join(@native_root, "Cargo.toml"),
+          Path.join(@native_root, "Cargo.lock")
+        ])
         |> Enum.filter(&File.exists?/1)
         |> Enum.any?(fn src ->
           File.stat!(src).mtime > target_mtime
@@ -51,6 +49,13 @@ defmodule Mix.Tasks.Compile.RexecNative do
     else
       true
     end
+  end
+
+  defp copy_binary(dst) do
+    src = Path.join([@native_root, "target", "release", @binary_name])
+    File.mkdir_p!(Path.dirname(dst))
+    File.cp!(src, dst)
+    File.chmod!(dst, 0o755)
   end
 end
 
