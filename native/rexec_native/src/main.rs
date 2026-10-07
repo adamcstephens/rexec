@@ -135,12 +135,26 @@ mod linux {
         Ok(children)
     }
 
-    fn parent(pid: i32) -> io::Result<i32> {
-        let stat = fs::read_to_string(format!("/proc/{pid}/stat"))?;
-        stat.rsplit_once(')')
-            .and_then(|(_, fields)| fields.split_whitespace().nth(1))
+    pub(super) fn parse_parent(stat: &[u8]) -> io::Result<i32> {
+        let fields = stat
+            .iter()
+            .rposition(|byte| *byte == b')')
+            .and_then(|end| stat.get(end + 1..))
+            .and_then(|fields| {
+                fields
+                    .split(|byte| byte.is_ascii_whitespace())
+                    .filter(|field| !field.is_empty())
+                    .nth(1)
+            })
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing process parent"))?;
+        std::str::from_utf8(fields)
+            .ok()
             .and_then(|field| field.parse().ok())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing process parent"))
+    }
+
+    fn parent(pid: i32) -> io::Result<i32> {
+        parse_parent(&fs::read(format!("/proc/{pid}/stat"))?)
     }
 
     fn vanished(error: &io::Error) -> bool {
@@ -507,5 +521,19 @@ mod linux {
             send_packet(writer, tag, &status.to_be_bytes());
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::linux::parse_parent;
+
+    #[test]
+    fn parses_parent_when_process_name_is_not_utf8() {
+        let mut stat = b"42 (name".to_vec();
+        stat.push(0xff);
+        stat.extend_from_slice(b") S 7 8 9\n");
+
+        assert_eq!(parse_parent(&stat).unwrap(), 7);
     }
 }
